@@ -1,0 +1,242 @@
+package sailpoint.community.rest;
+
+import java.io.IOException;
+import java.io.StringWriter;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import javax.ws.rs.Consumes;
+import javax.ws.rs.GET;
+import javax.ws.rs.POST;
+import javax.ws.rs.Path;
+import javax.ws.rs.PathParam;
+import javax.ws.rs.Produces;
+import javax.ws.rs.core.MediaType;
+import javax.ws.rs.core.Response;
+import javax.ws.rs.core.Response.Status;
+
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
+import org.dom4j.Document;
+import org.dom4j.DocumentException;
+import org.dom4j.DocumentHelper;
+import org.dom4j.io.OutputFormat;
+import org.dom4j.io.XMLWriter;
+
+import sailpoint.api.SailPointContext;
+import sailpoint.api.SailPointFactory;
+import sailpoint.object.Identity;
+import sailpoint.object.Rule;
+import sailpoint.rest.plugin.BasePluginResource;
+import sailpoint.rest.plugin.RequiredRight;
+import sailpoint.tools.GeneralException;
+
+@RequiredRight("communityRestObjectResource")
+@Path("/Object")
+public class ObjectResource extends BasePluginResource {
+
+    public static final Log log = LogFactory.getLog(ObjectResource.class);
+    private static SailPointContext context;
+    private static final SimpleDateFormat SDF = new SimpleDateFormat("yyyy-MM-dd");
+
+    static {
+        SDF.setLenient(false);
+    }
+
+    private void initConfig() throws GeneralException {
+        context = SailPointFactory.getCurrentContext();
+    }
+
+    @GET
+    @Path("/getRule/{name}")
+    @Consumes({"application/json"})
+    @Produces({"application/json"})
+    public Response getRule(@PathParam("name") String var1)
+            throws GeneralException, DocumentException, IOException {
+        this.initConfig();
+
+        String var3;
+        try {
+            Rule var2 = (Rule) context.getObject(Rule.class, var1);
+            if (var2 == null) {
+                return Response.status(Status.NOT_FOUND).entity("Rule not found").build();
+            }
+
+            var3 = var2.toXml(true);
+        } catch (GeneralException var8) {
+            return Response.serverError().entity(var8.getMessage()).build();
+        }
+
+        Document var4 = DocumentHelper.parseText(var3);
+        OutputFormat var5 = OutputFormat.createPrettyPrint();
+        StringWriter var6 = new StringWriter();
+        XMLWriter var7 = new XMLWriter(var6, var5);
+        var7.write(var4);
+        var3 = var6.toString();
+        return Response.ok(var3).build();
+    }
+
+    @POST
+    @Path("/setForwarding")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response setForwarding(List<ForwardingRequest> requests) {
+        try {
+            this.initConfig();
+
+            if (requests == null || requests.isEmpty()) {
+                return Response.status(Status.BAD_REQUEST)
+                        .entity("Request body is empty. Provide one or more forwarding entries.")
+                        .build();
+            }
+
+            List<Map<String, String>> results = new ArrayList<Map<String, String>>();
+            int successCount = 0;
+            int failureCount = 0;
+
+            for (ForwardingRequest req : requests) {
+                Map<String, String> result = new HashMap<String, String>();
+
+                String identityName = req.getIdentity();
+                String delegationName = req.getDelegation();
+                String startDateStr = req.getStartDate();
+                String endDateStr = req.getEndDate();
+
+                result.put("identity", identityName);
+
+                try {
+                    if (isBlank(identityName) || isBlank(delegationName)) {
+                        result.put("status", "FAIL");
+                        result.put("message", identityName + " --> fail to set delegation/forwarding");
+                        result.put("details", "identity and delegation are required");
+                        failureCount++;
+                        results.add(result);
+                        continue;
+                    }
+
+                    Identity identity = context.getObjectByName(Identity.class, identityName);
+                    if (identity == null) {
+                        result.put("status", "FAIL");
+                        result.put("message", identityName + " --> fail to set delegation/forwarding");
+                        result.put("details", "Source identity not found");
+                        failureCount++;
+                        results.add(result);
+                        continue;
+                    }
+
+                    Identity forwardIdentity = context.getObjectByName(Identity.class, delegationName);
+                    if (forwardIdentity == null) {
+                        result.put("status", "FAIL");
+                        result.put("message", identityName + " --> fail to set delegation/forwarding");
+                        result.put("details", "Delegation identity not found");
+                        failureCount++;
+                        results.add(result);
+                        continue;
+                    }
+
+                    Date startDate = parseDate(startDateStr);
+                    Date endDate = parseDate(endDateStr);
+
+                    Map prefMap = identity.getPreferences();
+                    if (prefMap == null) {
+                        prefMap = new HashMap();
+                    }
+
+                    prefMap.put("forward", forwardIdentity.getName());
+                    prefMap.put("forwardStartDate", startDate);
+                    prefMap.put("forwardEndDate", endDate);
+
+                    identity.setPreferences(prefMap);
+                    context.saveObject(identity);
+
+                    result.put("status", "SUCCESS");
+                    result.put("message", identityName + " --> delegation/forwarding set.");
+                    result.put("details", "Forwarding set to " + forwardIdentity.getName());
+
+                    successCount++;
+                } catch (Exception e) {
+                    log.error("Failed processing identity: " + identityName + ". Error: " + e.getMessage(), e);
+
+                    result.put("status", "FAIL");
+                    result.put("message", identityName + " --> fail to set delegation/forwarding");
+                    result.put("details", e.getMessage());
+
+                    failureCount++;
+                }
+
+                results.add(result);
+            }
+
+            context.commitTransaction();
+
+            Map<String, Object> response = new HashMap<String, Object>();
+            response.put("successCount", Integer.valueOf(successCount));
+            response.put("failureCount", Integer.valueOf(failureCount));
+            response.put("results", results);
+
+            return Response.ok(response).build();
+
+        } catch (Exception e) {
+            log.error("Bulk forwarding update failed: " + e.getMessage(), e);
+            return Response.serverError().entity(e.getMessage()).build();
+        }
+    }
+
+    private Date parseDate(String dateStr) throws Exception {
+        if (isBlank(dateStr)) {
+            return null;
+        }
+        return SDF.parse(dateStr);
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.trim().length() == 0;
+    }
+
+    public String getPluginName() {
+        return "communityrestapi";
+    }
+
+    public static class ForwardingRequest {
+        private String identity;
+        private String delegation;
+        private String startDate;
+        private String endDate;
+
+        public String getIdentity() {
+            return identity;
+        }
+
+        public void setIdentity(String identity) {
+            this.identity = identity;
+        }
+
+        public String getDelegation() {
+            return delegation;
+        }
+
+        public void setDelegation(String delegation) {
+            this.delegation = delegation;
+        }
+
+        public String getStartDate() {
+            return startDate;
+        }
+
+        public void setStartDate(String startDate) {
+            this.startDate = startDate;
+        }
+
+        public String getEndDate() {
+            return endDate;
+        }
+
+        public void setEndDate(String endDate) {
+            this.endDate = endDate;
+        }
+    }
+}
