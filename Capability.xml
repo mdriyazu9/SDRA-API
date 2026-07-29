@@ -1,0 +1,11 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!DOCTYPE Capability PUBLIC "sailpoint.dtd" "sailpoint.dtd">
+<Capability name="CommunityRESTApiFullAccess">
+  <Description>Community REST API Plugin</Description>
+  <RightRefs>
+    <Reference class="sailpoint.object.SPRight" name="communityRestCounterResource"/>
+    <Reference class="sailpoint.object.SPRight" name="communityRestRoleResource"/>
+    <Reference class="sailpoint.object.SPRight" name="communityRestBatchResource"/>
+    <Reference class="sailpoint.object.SPRight" name="communityRestOperationResource"/>
+  </RightRefs>
+</Capability>
