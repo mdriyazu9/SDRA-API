@@ -1,0 +1,92 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!DOCTYPE Rule PUBLIC "sailpoint.dtd" "sailpoint.dtd">
+<Rule language="beanshell" name="Cert Signoff To Entitlement Owner" type="CertificationSignOffApprover">
+  <Description>
+    After the initial certifier signs off or approval by the user's new manager then route the certification to the entitlement owner.
+    After the entitlement owner signs off, stop the chain so the certification closes.
+  </Description>
+  <Source>
+ import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import sailpoint.object.CertificationEntity;
+import sailpoint.object.CertificationItem;
+import sailpoint.object.Identity;
+import sailpoint.object.ManagedAttribute;
+import sailpoint.tools.Util;
+
+Map result = null;
+
+if (certification == null) {
+    log.error("Certification is null.");
+    return null;
+}
+
+if (certifier == null) {
+    log.error("Current certifier is null.");
+    return null;
+}
+
+Identity entitlementOwner = null;
+List entities = certification.getEntities();
+
+if (entities == null || entities.isEmpty()) {
+    log.error("Certification contains no entities.");
+    return null;
+}
+
+for (Object entObj : entities) {
+    if (!(entObj instanceof CertificationEntity)) {
+        continue;
+    }
+
+    CertificationEntity entity = (CertificationEntity) entObj;
+    List items = entity.getItems();
+
+    if (items == null) {
+        continue;
+    }
+
+    for (Object itemObj : items) {
+        if (!(itemObj instanceof CertificationItem)) {
+            continue;
+        }
+
+        CertificationItem item = (CertificationItem) itemObj;
+        Object certifiable = item.getCertifiable();
+
+        if (certifiable instanceof ManagedAttribute) {
+            ManagedAttribute managedAttribute =
+                (ManagedAttribute) certifiable;
+
+            Identity owner = managedAttribute.getOwner();
+
+            if (owner != null) {
+                entitlementOwner = owner;
+                break;
+            }
+        }
+    }
+
+    if (entitlementOwner != null) {
+        break;
+    }
+}
+
+if (entitlementOwner == null) {
+    log.error("No entitlement owner found.");
+    return null;
+}
+
+if (Util.nullSafeEq(entitlementOwner.getName(), certifier.getName())) {
+    log.warn("Entitlement owner is already the current certifier.");
+    return null;
+}
+
+result = new HashMap();
+result.put("identity", entitlementOwner);
+
+return result;
+  </Source>
+</Rule>
