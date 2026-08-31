@@ -6,86 +6,176 @@
     After the entitlement owner signs off, stop the chain so the certification closes.
   </Description>
   <Source>
- import java.util.HashMap;
+import java.lang.reflect.Method;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import sailpoint.object.Application;
 import sailpoint.object.CertificationEntity;
 import sailpoint.object.CertificationItem;
 import sailpoint.object.Identity;
 import sailpoint.object.ManagedAttribute;
+import sailpoint.object.Filter;
+import sailpoint.object.QueryOptions;
 import sailpoint.tools.Util;
 
-Map result = null;
-
-if (certification == null) {
-    log.error("Certification is null.");
+/*
+ * Returns the first available no-argument property from an IIQ object.
+ * This keeps the rule compatible with CertificationItem entitlement objects
+ * without calling the unsupported item.getCertifiable() method.
+ */
+Object readProperty(Object object, String[] methodNames) {
+  if (object == null) {
     return null;
+  }
+
+  for (int i = 0; i < methodNames.length; i++) {
+    try {
+      Method method = object.getClass().getMethod(
+        methodNames[i], new Class[0]
+      );
+      Object value = method.invoke(object, new Object[0]);
+
+      if (value != null) {
+        return value;
+      }
+    } catch (Exception ignored) {
+      // Try the next compatible getter.
+    }
+  }
+
+  return null;
 }
 
-if (certifier == null) {
-    log.error("Current certifier is null.");
-    return null;
+if (certification == null || certifier == null) {
+  log.error("Certification or current certifier is null.");
+  return null;
 }
 
-Identity entitlementOwner = null;
 List entities = certification.getEntities();
 
 if (entities == null || entities.isEmpty()) {
-    log.error("Certification contains no entities.");
-    return null;
+  log.error("Certification contains no entities.");
+  return null;
 }
 
-for (Object entObj : entities) {
-    if (!(entObj instanceof CertificationEntity)) {
-        continue;
+Identity entitlementOwner = null;
+
+for (Object entityObject : entities) {
+  if (!(entityObject instanceof CertificationEntity)) {
+    continue;
+  }
+
+  CertificationEntity entity = (CertificationEntity) entityObject;
+  List items = entity.getItems();
+
+  if (items == null || items.isEmpty()) {
+    continue;
+  }
+
+  for (Object itemObject : items) {
+    if (!(itemObject instanceof CertificationItem)) {
+      continue;
     }
 
-    CertificationEntity entity = (CertificationEntity) entObj;
-    List items = entity.getItems();
+    CertificationItem item = (CertificationItem) itemObject;
 
-    if (items == null) {
-        continue;
+    /*
+     * CertificationItem does not provide getCertifiable() in IIQ 8.2.
+     * Entitlement details are held in getEntitlements().
+     */
+    List entitlements = item.getEntitlements();
+
+    if (entitlements == null || entitlements.isEmpty()) {
+      log.warn("No entitlement data for certification item: " + item.toXml());
+      continue;
     }
 
-    for (Object itemObj : items) {
-        if (!(itemObj instanceof CertificationItem)) {
-            continue;
-        }
+    for (Object entitlement : entitlements) {
+      Object applicationValue = readProperty(entitlement,
+        new String[] { "getApplication", "getApplicationName", "getAppName" });
 
-        CertificationItem item = (CertificationItem) itemObj;
-        Object certifiable = item.getCertifiable();
+      Object attributeValue = readProperty(entitlement,
+        new String[] { "getAttribute", "getAttributeName", "getName" });
 
-        if (certifiable instanceof ManagedAttribute) {
-            ManagedAttribute managedAttribute =
-                (ManagedAttribute) certifiable;
+      Object entitlementValue = readProperty(entitlement,
+        new String[] { "getValue", "getAttributeValue" });
 
-            Identity owner = managedAttribute.getOwner();
+      if (applicationValue == null || entitlementValue == null) {
+        log.warn("Incomplete entitlement details: " + entitlement);
+        continue;
+      }
 
-            if (owner != null) {
-                entitlementOwner = owner;
-                break;
-            }
-        }
+      String applicationName = String.valueOf(applicationValue);
+      Application application = context.getObjectByName(
+        Application.class, applicationName
+      );
+
+      if (application == null) {
+        log.warn("Application not found: " + applicationName);
+        continue;
+      }
+
+      QueryOptions options = new QueryOptions();
+      options.add(Filter.eq("application", application));
+      options.add(Filter.eq("value", String.valueOf(entitlementValue)));
+
+      if (attributeValue != null) {
+        options.add(Filter.eq("attribute", String.valueOf(attributeValue)));
+      }
+
+      List managedAttributes = context.getObjects(
+        ManagedAttribute.class, options
+      );
+
+      if (managedAttributes == null || managedAttributes.isEmpty()) {
+        log.warn("No ManagedAttribute found for application="
+          + applicationName + ", attribute=" + attributeValue
+          + ", value=" + entitlementValue);
+        continue;
+      }
+
+      ManagedAttribute managedAttribute =
+        (ManagedAttribute) managedAttributes.get(0);
+
+      if (managedAttribute.getOwner() != null) {
+        entitlementOwner = managedAttribute.getOwner();
+        log.error("Resolved entitlement owner: "
+          + entitlementOwner.getName());
+        break;
+      }
+
+      log.warn("ManagedAttribute has no owner: "
+        + managedAttribute.getName());
     }
 
     if (entitlementOwner != null) {
-        break;
+      break;
     }
+  }
+
+  if (entitlementOwner != null) {
+    break;
+  }
 }
 
 if (entitlementOwner == null) {
-    log.error("No entitlement owner found.");
-    return null;
+  log.error("No entitlement owner could be resolved.");
+  return null;
 }
 
+/* Second sign-off: owner is already the current signer, so close the chain. */
 if (Util.nullSafeEq(entitlementOwner.getName(), certifier.getName())) {
-    log.warn("Entitlement owner is already the current certifier.");
-    return null;
+  log.error("Entitlement owner is the current signer; closing sign-off chain.");
+  return null;
 }
 
-result = new HashMap();
+Map result = new HashMap();
 result.put("identity", entitlementOwner);
+
+log.error("Routing certification to entitlement owner: "
+  + entitlementOwner.getName());
 
 return result;
   </Source>
