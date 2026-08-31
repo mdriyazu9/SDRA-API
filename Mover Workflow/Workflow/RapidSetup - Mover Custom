@@ -1,6 +1,6 @@
 <?xml version='1.0' encoding='UTF-8'?>
 <!DOCTYPE Workflow PUBLIC "sailpoint.dtd" "sailpoint.dtd">
-<Workflow explicitTransitions="true" libraries="RapidSetup" name="RapidSetup - Mover Custom" type="IdentityLifecycle">
+<Workflow created="1787728540840" explicitTransitions="true" id="7f000001a03c182081a03cecb4a80014" libraries="RapidSetup" modified="1787828331009" name="RapidSetup - Mover Custom - FIXED" type="IdentityLifecycle">
   <Variable input="true" name="trigger">
     <Description>The IdentityTrigger</Description>
   </Variable>
@@ -64,7 +64,7 @@
             Set to true because we are passing the project in to save unmanaged plan as an argument.
         </Description>
   </Variable>
-  <Description>Mover workflow with two-level certification approval: New Manager → Entitlement Owner. Removed params argument to prevent runtime filter overrides.</Description>
+  <Description>Mover workflow with two-level certification approval: New Manager → Entitlement Owner. FIXED: Ensured project initialization before buildMoverPlan.</Description>
   <Step icon="Start" name="Start" posX="28" posY="10">
     <Transition to="Get Request Type"/>
   </Step>
@@ -82,6 +82,7 @@
     <Arg name="identityName" value="ref:identityName"/>
     <Arg name="templateName" value="CertificationTemplate-RapidSetup-Mover-MR"/>
     <Arg name="certGenMaxWaitSeconds" value="5"/>
+    <Arg name="project" value="ref:project"/>
     <Transition to="Wait for cert gen" when="script:!isCertGenCompleted"/>
     <Transition to="Calculate Birthright Roles" when="call:isMoverJoinerEnabled"/>
     <Transition to="Execute Mover Post Rule"/>
@@ -102,6 +103,7 @@
   <Step action="call:buildMoverPlan" name="Build Plan" posX="378" posY="260" resultVariable="plan">
     <Arg name="birthrightRoles" value="ref:birthrightRoles"/>
     <Arg name="identityName" value="ref:identityName"/>
+    <Arg name="project" value="ref:project"/>
     <Transition to="Execute Mover Post Rule" when="script:(plan == null)"/>
     <Transition to="Process Plan"/>
   </Step>
@@ -118,7 +120,7 @@
     <Return name="approvalSet" to="approvalSet"/>
     <Return name="project" to="project"/>
     <WorkflowRef>
-      <Reference class="sailpoint.object.Workflow" id="" name="LCM Provisioning"/>
+      <Reference class="sailpoint.object.Workflow" id="7f0000017ab01aed817ab04b08cd0037" name="LCM Provisioning"/>
     </WorkflowRef>
     <Transition to="Execute Mover Post Rule"/>
   </Step>
