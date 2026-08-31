@@ -35,7 +35,7 @@
       <entry key="certificationNameTemplate" value="RapidSetup Mover Targeted Certification [${fullDate}]"/>
       <entry key="certificationShowRecommendations" value="false"/>
       <entry key="certificationSignOffApprovalEmailTemplate" value="Certification Sign Off Approval"/>
-      <entry key="certificationSignOffApprover" value="Cert Signoff To Entitlement Owner"/>
+      <entry key="signOffApproverRuleName" value="Cert Signoff To Entitlement Owner"/>
       <entry key="certificationType" value="Focused"/>
       <entry key="certifierOwnerAccount" value="ApplicationOwner"/>
       <entry key="certifierOwnerEntitlement" value="ApplicationOwner"/>
